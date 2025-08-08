@@ -10,7 +10,7 @@ file_paths = [
     # ...
 ]
 
-
+# Read and standardize single fund data
 def load_and_standardize(filepath):
     engine = "openpyxl" if filepath.endswith("xlsx") else None
     df = pd.read_excel(filepath, engine=engine)
@@ -40,7 +40,7 @@ def load_and_standardize(filepath):
     df = df.dropna(subset=["date"]).set_index("date").sort_index()
     return df
 
-
+# Merge the net asset value data of all funds
 merged = None
 for p in file_paths:
     try:
@@ -50,21 +50,20 @@ for p in file_paths:
         print(f"Pass：{p} - {e}")
 
 merged = merged.sort_index()
-
 unit_nav_df = merged.filter(regex="_UnitValue$")
 
+# Data cleaning
 unit_nav_df = unit_nav_df.dropna(how="all")
-
 unit_nav_df = unit_nav_df.loc[:, unit_nav_df.notna().sum() >= 50]
-
 unit_nav_df = unit_nav_df[unit_nav_df.notna().sum(axis=1) >= 3]
-
 unit_nav_df = unit_nav_df.ffill()
 unit_nav_df = unit_nav_df.replace(0, np.nan)
 unit_nav_df = unit_nav_df.where(unit_nav_df > 0).dropna(how="all")
 
+# calculate the log return
 ret_df = np.log(unit_nav_df).diff().dropna()
 
+# Alpha/Beta Factorization
 market_ret = ret_df.mean(axis=1)
 
 alphas = {}
@@ -83,7 +82,6 @@ for fund in ret_df.columns:
 
 alpha_beta_df = pd.DataFrame({"Alpha": alphas, "Beta": betas})
 alpha_beta_df.index.name = "Fund"
-
 alpha_beta_df.to_csv("../fund_alpha_beta.csv")
 unit_nav_df.to_csv("../clean_unit_nav.csv")
 ret_df.to_csv("../returns_log.csv")

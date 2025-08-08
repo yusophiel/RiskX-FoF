@@ -10,6 +10,7 @@ from sklearn.linear_model import RidgeCV, LinearRegression
 from sklearn.metrics import mean_squared_error
 warnings.filterwarnings("ignore")
 
+# # Calculate the fund's Alpha and Beta relative to the benchmark
 def compute_alpha_beta(ret_series, benchmark_ret):
     common_index = ret_series.dropna().index.intersection(benchmark_ret.dropna().index)
     X = benchmark_ret.loc[common_index].values.reshape(-1, 1)
@@ -19,7 +20,7 @@ def compute_alpha_beta(ret_series, benchmark_ret):
     model = LinearRegression().fit(X, y)
     return model.intercept_, model.coef_[0]
 
-
+# Core backtesting function: Ridge regression multi-factor dynamic weight strategy
 def rolling_backtest(ret_df, mu_df, risk_df=None, benchmark=None,
                      lookback=30, holding=3, cost_rate=0.001, gap=1):
 
@@ -105,6 +106,7 @@ def rolling_backtest(ret_df, mu_df, risk_df=None, benchmark=None,
             t += holding
             continue
 
+        # Training Ridge Regression (Cross-Validation λ)
         model = RidgeCV(alphas=np.logspace(-3, 3, 10))
         model.fit(X_train, y_train)
 
@@ -171,7 +173,7 @@ def rolling_backtest(ret_df, mu_df, risk_df=None, benchmark=None,
     W = pd.DataFrame(w_hist)
     return nav_series, W
 
-
+# Calculate various performance indicators of the equity curve.
 def calc_metrics(nav_df):
     nav_ret_df = nav_df.pct_change().dropna()
     perf = []
@@ -193,7 +195,7 @@ def calc_metrics(nav_df):
         })
     return pd.DataFrame(perf).set_index("Strategy")
 
-
+# Perform portfolio backtesting based on a given weight sequence and fund daily returns
 def run_backtest_for_weights(weight_df: pd.DataFrame,
                              ret_df: pd.DataFrame,
                              cost_rate: float = 0.001) -> pd.Series:
@@ -226,7 +228,7 @@ def run_backtest_for_weights(weight_df: pd.DataFrame,
     nav_series = pd.Series(np.exp(nav[1:]), index=weight_df.index, name=weight_df.name if hasattr(weight_df, 'name') else "strategy")
     return nav_series
 
-
+# Draw multiple equity curves
 def plot_nav_series(*nav_series_list, title="Net Asset Value Curve"):
     plt.figure(figsize=(12, 5))
     for nav in nav_series_list:
@@ -241,6 +243,7 @@ def plot_nav_series(*nav_series_list, title="Net Asset Value Curve"):
     plt.show()
 
 def main():
+    # Loading basic data
     ret_df = pd.read_csv("../returns_log.csv", index_col=0, parse_dates=True)
     df = pd.read_csv("../xgb_preds_daily.csv", parse_dates=["date"])
     mu_df = df.pivot_table(index="date", columns="fund", values="pred")
@@ -248,6 +251,7 @@ def main():
     df_risk = pd.read_csv("../fund_risk_daily.csv", parse_dates=["date"])
     risk_df = df_risk.pivot(index="date", columns="fund")
 
+    # Alignment Date
     common_dates = ret_df.index.intersection(mu_df.index).intersection(risk_df.index)
     ret_df = ret_df.loc[common_dates].sort_index()
     mu_df = mu_df.loc[common_dates].sort_index()
@@ -262,11 +266,13 @@ def main():
     assert mu_df.shape[0] == ret_df.shape[0], "The number of rows in mu_df and ret_df is inconsistent. "
     print(f"Data alignment successful, totaling {mu_df.shape[0]} trading days")
 
+    # Backtesting the Ridge Regression Strategy
     nav_ridge, weights = rolling_backtest(
         ret_df, mu_df, risk_df=risk_df, benchmark=benchmark,
         lookback=30, holding=3, gap=1
     )
 
+    # Backtest other saved static strategy weights
     strategy_dir = "../portfolio_weights"
     nav_series_list = []
     strategy_names = []
@@ -288,6 +294,7 @@ def main():
     nav_series_list.append(nav_ridge)
     strategy_names.append("ridge_regression")
 
+    # Equal Weight Strategy (Baseline)
     equal_w = pd.DataFrame(1.0 / weights.shape[1], index=weights.index, columns=weights.columns)
     equal_ret = (ret_df * equal_w).sum(axis=1)
     equal_nav = (1 + equal_ret).cumprod()
@@ -295,6 +302,7 @@ def main():
     nav_series_list.append(equal_nav)
     strategy_names.append("Equal_Weighted")
 
+    # Draw equity curves & calculate performance indicators
     plot_nav_series(*nav_series_list, title="All Strategies NAV Comparison")
     nav_df = pd.concat(nav_series_list, axis=1)
 
