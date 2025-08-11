@@ -42,7 +42,7 @@ def calc_weights(preds: pd.DataFrame, method: str = None, risk: pd.DataFrame = N
                 w = inv_risk / inv_risk.sum()
             elif method == "alpha_beta":
                 if risk is None or benchmark is None:
-                    raise ValueError("alpha_beta 策略需要 risk + benchmark")
+                    raise ValueError("alpha_beta strategy needs risk + benchmark")
                 alphas, betas = [], []
                 for fund in valid.index:
                     y = preds[fund].loc[:date].dropna()
@@ -58,6 +58,13 @@ def calc_weights(preds: pd.DataFrame, method: str = None, risk: pd.DataFrame = N
                 alpha_score = pd.Series(alphas, index=valid.index).fillna(0).clip(lower=0)
                 beta_score = pd.Series(betas, index=valid.index).fillna(0)
                 beta_score = (1 / (beta_score.abs() + 1e-6)).clip(lower=0)
+
+                risk_today = risk.loc[date, valid.index]
+                risk_adj = (1 / (risk_today + 1e-6)).clip(lower=0)  # 风险越高，调整系数越小
+
+                alpha_score *= risk_adj
+                beta_score *= risk_adj
+
                 alpha_score /= alpha_score.sum() if alpha_score.sum() > 0 else 1
                 beta_score /= beta_score.sum() if beta_score.sum() > 0 else 1
                 combined = alpha_weight * alpha_score + (1 - alpha_weight) * beta_score
