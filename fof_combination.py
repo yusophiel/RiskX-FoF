@@ -77,7 +77,9 @@ def calc_weights(preds: pd.DataFrame, method: str = None, risk: pd.DataFrame = N
 # Generate weights for the two strategies
 w_risk = calc_weights(df_mu, method="risk_parity")
 w_alpha_beta_cvar = calc_weights(df_mu, method="alpha_beta", risk=df_cvar, benchmark=df_benchmark, alpha_weight=0.7)
+w_alpha_beta_vol = calc_weights(df_mu, method="alpha_beta", risk=df_vol, benchmark=df_benchmark, alpha_weight=0.7)
 
 os.makedirs("../portfolio_weights", exist_ok=True)
 w_risk.to_csv("../portfolio_weights/risk_parity_weights_daily.csv")
 w_alpha_beta_cvar.to_csv("../portfolio_weights/alpha_beta_cvar_weights_daily.csv")
+w_alpha_beta_vol.to_csv("../portfolio_weights/alpha_beta_vol_weights_daily.csv")
