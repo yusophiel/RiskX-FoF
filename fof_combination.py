@@ -24,61 +24,55 @@ df_benchmark = df_benchmark.loc[common_dates]
 
 # Weight calculation function
 def calc_weights(preds: pd.DataFrame, method: str = None, risk: pd.DataFrame = None,
-                 benchmark: pd.Series = None, alpha_weight: float = 0.7) -> pd.DataFrame:
+                 benchmark: pd.Series = None, alpha_weight: float = 0.7, holding_period=3) -> pd.DataFrame:
+    dates = preds.index
     weights_list = []
+    last_w = None
 
-    for date, row in preds.iterrows():
-        valid = row.dropna()
-        if len(valid) == 0:
-            continue
-
-        elif method == "risk_parity":
-            hist = preds.loc[:date].tail(20)
-            stds = hist.std()
-            stds = stds[valid.index]
-            inv_risk = 1 / (stds + 1e-6)
-            w = inv_risk / inv_risk.sum()
-
-        elif method == "alpha_beta":
-            if risk is None or benchmark is None:
-                raise ValueError("Alpha_beta strategy requires risk + benchmark")
-
-            alphas = []
-            betas = []
-
-            for fund in valid.index:
-                y = preds[fund].loc[:date].dropna()
-                x = benchmark.loc[y.index]
-
-                if len(x) < 20:
-                    alpha, beta = np.nan, np.nan
-                else:
-                    model = np.polyfit(x, y, 1)
-                    beta = model[0]
-                    alpha = model[1]
-
-                alphas.append(alpha)
-                betas.append(beta)
-
-            alpha_score = pd.Series(alphas, index=valid.index).fillna(0)
-            beta_score = pd.Series(betas, index=valid.index).fillna(0)
-
-            alpha_score = alpha_score.clip(lower=0)
-            beta_score = (1 / (beta_score.abs() + 1e-6)).clip(lower=0)
-
-            alpha_score = alpha_score / alpha_score.sum() if alpha_score.sum() > 0 else alpha_score
-            beta_score = beta_score / beta_score.sum() if beta_score.sum() > 0 else beta_score
-
-            combined = alpha_weight * alpha_score + (1 - alpha_weight) * beta_score
-            w = combined / combined.sum() if combined.sum() > 0 else pd.Series(1 / len(valid), index=valid.index)
-
+    for i, date in enumerate(dates):
+        if i % holding_period == 0:
+            valid = preds.loc[date].dropna()
+            if len(valid) == 0:
+                w = last_w if last_w is not None else pd.Series(0, index=preds.columns)
+            elif method == "risk_parity":
+                hist = preds.loc[:date].tail(20)
+                stds = hist.std()
+                stds = stds[valid.index]
+                inv_risk = 1 / (stds + 1e-6)
+                w = inv_risk / inv_risk.sum()
+            elif method == "alpha_beta":
+                if risk is None or benchmark is None:
+                    raise ValueError("alpha_beta 策略需要 risk + benchmark")
+                alphas, betas = [], []
+                for fund in valid.index:
+                    y = preds[fund].loc[:date].dropna()
+                    x = benchmark.loc[y.index]
+                    if len(x) < 20:
+                        alpha, beta = np.nan, np.nan
+                    else:
+                        model = np.polyfit(x, y, 1)
+                        beta = model[0]
+                        alpha = model[1]
+                    alphas.append(alpha)
+                    betas.append(beta)
+                alpha_score = pd.Series(alphas, index=valid.index).fillna(0).clip(lower=0)
+                beta_score = pd.Series(betas, index=valid.index).fillna(0)
+                beta_score = (1 / (beta_score.abs() + 1e-6)).clip(lower=0)
+                alpha_score /= alpha_score.sum() if alpha_score.sum() > 0 else 1
+                beta_score /= beta_score.sum() if beta_score.sum() > 0 else 1
+                combined = alpha_weight * alpha_score + (1 - alpha_weight) * beta_score
+                w = combined / combined.sum() if combined.sum() > 0 else pd.Series(1 / len(valid), index=valid.index)
+            else:
+                raise ValueError("Unknown method")
+            last_w = w
         else:
-            raise ValueError("Unknown method")
+            w = last_w.copy()
 
-        w.name = date
+        w = w.reindex(preds.columns).fillna(0)
         weights_list.append(w)
 
-    return pd.DataFrame(weights_list)
+    weights_df = pd.DataFrame(weights_list, index=dates)
+    return weights_df
 
 # Generate weights for the two strategies
 w_risk = calc_weights(df_mu, method="risk_parity")
