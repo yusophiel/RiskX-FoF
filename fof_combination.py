@@ -60,7 +60,7 @@ def calc_weights(preds: pd.DataFrame, method: str = None, risk: pd.DataFrame = N
                 beta_score = (1 / (beta_score.abs() + 1e-6)).clip(lower=0)
 
                 risk_today = risk.loc[date, valid.index]
-                risk_adj = (1 / (risk_today + 1e-6)).clip(lower=0)  # 风险越高，调整系数越小
+                risk_adj = (1 / (risk_today + 1e-6)).clip(lower=0) 
 
                 alpha_score *= risk_adj
                 beta_score *= risk_adj
