@@ -26,13 +26,31 @@ def compute_alpha_beta(ret_series, benchmark_ret, window=30, end_idx=None):
 # Rolling backtest and generating weights
 def rolling_backtest_weights(ret_df, mu_df, risk_df=None, benchmark=None,
                              lookback=30, holding=1, gap=1, fill_non_rebalance=True,
-                             risk_adjust_post=False):
+                             risk_adjust_post=False, alpha_beta_window=30):
     dates = ret_df.index
     w_hist = []
-    t = lookback + gap
 
+    # Precompute alpha/beta series (using only the past alpha_beta_window days of data)
+    if benchmark is not None:
+        alpha_df = pd.DataFrame(index=ret_df.index, columns=ret_df.columns, dtype=float)
+        beta_df = pd.DataFrame(index=ret_df.index, columns=ret_df.columns, dtype=float)
+
+        for fund in ret_df.columns:
+            for i in range(alpha_beta_window, len(ret_df)):
+                r_fund = ret_df[fund].iloc[i - alpha_beta_window:i]
+                r_bench = benchmark.iloc[i - alpha_beta_window:i]
+                alpha, beta = compute_alpha_beta(r_fund, r_bench)
+                alpha_df.iat[i, alpha_df.columns.get_loc(fund)] = alpha
+                beta_df.iat[i, beta_df.columns.get_loc(fund)] = beta
+
+        alpha_df = alpha_df.shift(1)
+        beta_df = beta_df.shift(1)
+    else:
+        alpha_df, beta_df = None, None
+
+    # Rolling backtest
+    t = lookback + gap
     while t < len(dates):
-        # Constructing training intervals
         train_start = t - lookback - gap
         train_end = t - gap
         if train_start < 0 or train_end <= train_start:
@@ -42,29 +60,21 @@ def rolling_backtest_weights(ret_df, mu_df, risk_df=None, benchmark=None,
         mu_window = mu_df.iloc[train_start:train_end]
         ret_window = ret_df.iloc[train_start + 1:train_end + 1]
 
-        # α/β calculation (fixed window)
-        alpha_beta = {}
-        if benchmark is not None:
-            for fund in ret_df.columns:
-                alpha, beta = compute_alpha_beta(
-                    ret_df[fund].iloc[:train_end],
-                    benchmark.iloc[:train_end]
-                )
-                alpha_beta[fund] = (alpha, beta)
-
-        # Construct training set (X=μ, α, β, y=real return)
+        # Constructing a training set
         X_train, y_train = [], []
-        for i in range(mu_window.shape[0]):
+        for i, date in enumerate(mu_window.index):
             mu_row = mu_window.iloc[i].dropna()
             funds = mu_row.index
             if len(funds) == 0:
                 continue
+
             if benchmark is not None:
-                alpha = [alpha_beta.get(f, (0, 0))[0] for f in funds]
-                beta = [alpha_beta.get(f, (0, 0))[1] for f in funds]
-                x = np.stack([mu_row.values, alpha, beta], axis=1)
+                alpha_vals = alpha_df.loc[date, funds].values
+                beta_vals = beta_df.loc[date, funds].values
+                x = np.stack([mu_row.values, alpha_vals, beta_vals], axis=1)
             else:
                 x = mu_row.values.reshape(-1, 1)
+
             y = ret_window.iloc[i][funds].values
             mask = ~np.isnan(x).any(axis=1) & ~np.isnan(y)
             if mask.sum() > 0:
@@ -78,7 +88,6 @@ def rolling_backtest_weights(ret_df, mu_df, risk_df=None, benchmark=None,
         X_train = np.concatenate(X_train)
         y_train = np.concatenate(y_train)
 
-        # Ridge regression fits the mapping from μ to returns
         model = RidgeCV(alphas=np.logspace(-3, 3, 10))
         model.fit(X_train, y_train)
 
@@ -90,15 +99,15 @@ def rolling_backtest_weights(ret_df, mu_df, risk_df=None, benchmark=None,
             continue
 
         if benchmark is not None:
-            alpha = [alpha_beta.get(f, (0, 0))[0] for f in funds]
-            beta = [alpha_beta.get(f, (0, 0))[1] for f in funds]
-            X_test = np.stack([mu_today.values, alpha, beta], axis=1)
+            alpha_vals = alpha_df.loc[dates[t], funds].values
+            beta_vals = beta_df.loc[dates[t], funds].values
+            X_test = np.stack([mu_today.values, alpha_vals, beta_vals], axis=1)
         else:
             X_test = mu_today.values.reshape(-1, 1)
 
         raw_scores = pd.Series(model.predict(X_test), index=funds)
 
-        # Risk factor adjustment
+        # Risk post-processing
         if risk_adjust_post and risk_df is not None:
             risk_row_all = risk_df.loc[dates[t]].reindex(funds)
 
@@ -113,29 +122,23 @@ def rolling_backtest_weights(ret_df, mu_df, risk_df=None, benchmark=None,
                     s = risk_row_all.loc[metric_name].reindex(funds)
                 except KeyError:
                     return pd.Series(0, index=funds)
-
                 if s.isna().all():
                     return pd.Series(0, index=funds)
-
                 return s.fillna(0)
 
             z_vol = zscore(safe_metric("volatility_20"))
             z_cvar = zscore(safe_metric("cvar_20"))
             z_mdd = zscore(safe_metric("mdd_20"))
 
-            # Composite Risk Score (Volatility 40% + CVaR 30% + MDD 20%)
             risk_score = 0.4 * z_vol + 0.3 * z_cvar + 0.2 * z_mdd
             if (risk_score.abs() < 1e-8).all():
                 risk_score[:] = 0
 
-            # Quantile Clipping & Min-Max Normalization
             risk_score = risk_score.clip(
                 lower=risk_score.quantile(0.05),
                 upper=risk_score.quantile(0.95)
             )
             risk_score = (risk_score - risk_score.min()) / (risk_score.max() - risk_score.min() + 1e-6)
-
-            # The inverse of risk as an adjustment factor
             risk_adj = 1 / (risk_score + 1e-6)
             risk_adj = risk_adj.clip(lower=0.5, upper=2.0)
 
@@ -143,7 +146,10 @@ def rolling_backtest_weights(ret_df, mu_df, risk_df=None, benchmark=None,
 
         # Weight normalization
         weights = raw_scores.clip(lower=0)
-        weights = weights / weights.sum() if weights.sum() > 0 else pd.Series(1.0 / len(weights), index=weights.index)
+        if weights.sum() > 0:
+            weights = weights / weights.sum()
+        else:
+            weights = pd.Series(1.0 / len(weights), index=weights.index)
 
         w_all = pd.Series(0.0, index=ret_df.columns, name=dates[t])
         w_all[weights.index] = weights
@@ -155,7 +161,6 @@ def rolling_backtest_weights(ret_df, mu_df, risk_df=None, benchmark=None,
     if fill_non_rebalance:
         W = W.reindex(dates).ffill().fillna(0)
     return W
-
 
 # Backtesting Logic (T+1 Execution)
 def run_backtest_for_weights(weight_df: pd.DataFrame,
