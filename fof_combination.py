@@ -54,7 +54,7 @@ betas_df = betas_df.shift(1)
 # Core: Rolling generation weights (combining μ, α, β, risk)
 def rolling_alpha_beta_mu_weights(
     mu_df, alphas_df, betas_df, risk_df,
-    lookback=30, holding=3,
+    lookback=30, holding=1,
     risk_clip=(0.3, 3.0),
     alpha_weight=0.4
 ):

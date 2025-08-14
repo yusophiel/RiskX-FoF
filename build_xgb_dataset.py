@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 # Forecast days of future earnings
-horizon = 3
+horizon = 1
 # Rolling window length for calculating risk indicators
 roll_feat_win = 15
 

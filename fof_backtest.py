@@ -25,7 +25,7 @@ def compute_alpha_beta(ret_series, benchmark_ret, window=30, end_idx=None):
 
 # Rolling backtest and generating weights
 def rolling_backtest_weights(ret_df, mu_df, risk_df=None, benchmark=None,
-                             lookback=30, holding=3, gap=1, fill_non_rebalance=True,
+                             lookback=30, holding=1, gap=1, fill_non_rebalance=True,
                              risk_adjust_post=False):
     dates = ret_df.index
     w_hist = []
@@ -262,7 +262,7 @@ def main():
 
     # Ridge regression strategy (risk adjustment after prediction)
     weights_ridge = rolling_backtest_weights(ret_df, mu_df, risk_df, benchmark,
-                                             lookback=30, holding=3, gap=1,
+                                             lookback=30, holding=1, gap=1,
                                              fill_non_rebalance=True,
                                              risk_adjust_post=True)
     nav_ridge = run_backtest_for_weights(weights_ridge, ret_df, t_plus_delay=1)

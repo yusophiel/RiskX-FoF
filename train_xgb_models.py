@@ -2,11 +2,11 @@ import pandas as pd
 import xgboost as xgb
 
 # Training window length (days)
-train_window = 40
+train_window = 30
 # Position/forecast window length (days)
-holding_window = 3
+holding_window = 1
 # Sliding window step size
-step_size = 3
+step_size = 1
 # Minimum number of valid training samples
 min_train_size = 20
 # Optional: "sliding" (sliding window), "expanding" (expanding window), "single" (single training)
